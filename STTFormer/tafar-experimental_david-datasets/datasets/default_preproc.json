@@ -1,5 +1,5 @@
 {
-  "-root": "/home/lerch-iosb/Daten/ActionRecognition/nturgb+d_skeletons",
+  "-root": "/home/yas50454/repos/STTFormer/tafar-experimental_david-datasets/datasets",
   "-missing_path": "ntu120_missing.txt",
-  "-train_pkl_path": "/home/lerch-iosb/Daten/ntu_data/ntu60_3danno.pkl"
+  "-train_pkl_path": "/home/yas50454/datasets/NTU_Data/NTU_60/ntu60_3danno.pkl"
 }

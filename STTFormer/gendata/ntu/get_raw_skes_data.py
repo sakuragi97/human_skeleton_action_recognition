@@ -26,7 +26,7 @@ def get_raw_bodies_data(skes_path, ske_name, frames_drop_skes, frames_drop_logge
     ske_file = osp.join(skes_path, ske_name + '.skeleton')
     assert osp.exists(ske_file), 'Error: Skeleton file %s not found' % ske_file
     # Read all data from .skeleton file into a list (in string format)
-    print('Reading data from %s' % ske_file[-29:])  
+    print('Reading data from %s' % ske_file[-29:])
     with open(ske_file, 'r') as fr:
         str_data = fr.readlines()
 

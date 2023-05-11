@@ -16,7 +16,7 @@ from common import utils
 
 
 class BaseDataset(Dataset, metaclass=ABCMeta):
-    """Base class for datasets.
+    """Base class for datasets.None
 
     All datasets to process video should subclass it.
     All subclasses should overwrite:
@@ -121,12 +121,13 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
         # and prepare_test_frames, so we keep only one method
         results = copy.deepcopy(self.video_infos[idx])
         results['start_index'] = self.start_index
-        results['keypoint'] = self.select_body(results['keypoint'])
-
+        # results['keypoint'] = self.select_body(results['keypoint'])
         # prepare tensor in getitem
         # If HVU, type(results['label']) is dict
         # if self.multi_class and isinstance(results['label'], list):
-        onehot = torch.zeros(self.num_classes)
+        # onehot = torch.zeros(self.num_classes)
+        # self.num_classes = 60
+        onehot = torch.zeros(self.num_classes) #### ERROR EDITED
         onehot[results['label']] = 1.
         results['label'] = onehot
         results['input'] = results['keypoint']
@@ -141,33 +142,35 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
         results['input'] = torch.from_numpy(results['input'].astype(np.float32))
         return results
 
-    def collate_fn(self, batch):
-        """custom collate function for dealing with samples with different sequence length"""
-        pose_key_noisy = 'input'
-        pose_key_orig = 'keypoint'
 
-        b_pose_noisy = [item.pop(pose_key_noisy) for item in batch]
-        b_pose_noisy, mask = utils.pad_sequence(
-            b_pose_noisy, padding_value=0, mask_padding_value=self.mask_pad_value,
-            return_mask=True,
-        )
+    # def collate_fn(self, batch):
+    #     """custom collate function for dealing with samples with different sequence length"""
+    #     pose_key_noisy = 'input'
+    #     pose_key_orig = 'keypoint'
 
-        b_pose_orig = [item.pop(pose_key_orig) for item in batch]
-        b_pose_orig, mask_orig = utils.pad_sequence(
-            b_pose_orig, padding_value=0, mask_padding_value=self.mask_pad_value,
-            return_mask=True,
-        )
+    #     b_pose_noisy = [item.pop(pose_key_noisy) for item in batch]
+    #     b_pose_noisy, mask = utils.pad_sequence(
+    #         b_pose_noisy, padding_value=0, mask_padding_value=self.mask_pad_value,
+    #         return_mask=True,
+    #     )
 
-        assert torch.equal(mask, mask_orig)
+    #     b_pose_orig = [item.pop(pose_key_orig) for item in batch]
+    #     b_pose_orig, mask_orig = utils.pad_sequence(
+    #         b_pose_orig, padding_value=0, mask_padding_value=self.mask_pad_value,
+    #         return_mask=True,
+    #     )
 
-        batch = default_collate(batch)
-        batch.update({
-            pose_key_noisy: b_pose_noisy.flatten(start_dim=2),
-            pose_key_orig: b_pose_orig.flatten(start_dim=2),
-            'mask': mask,
-        })
+    #     assert torch.equal(mask, mask_orig)
 
-        return batch
+    #     batch = default_collate(batch)
+    #     batch.update({
+    #         pose_key_noisy: b_pose_noisy.flatten(start_dim=2),
+    #         pose_key_orig: b_pose_orig.flatten(start_dim=2),
+    #         'mask': mask,
+    #     })
+
+    #     return batch
+
 
     def __len__(self):
         """Get the size of the dataset."""

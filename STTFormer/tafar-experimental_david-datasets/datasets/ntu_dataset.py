@@ -1,7 +1,12 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import mmcv
 import os.path as osp
+import pickle
+import torchvision
 
+import preprocess.augmentations as augmentations
+
+from preprocess.augmentations import Normalize3D
 from base_dataset import BaseDataset
 
 
@@ -97,7 +102,18 @@ class NTUDataset(BaseDataset):
 
 
 if __name__ == '__main__':
-    ann_file = '/home/zhong/Documents/datasets/NTU_60/ntu60_3danno.pkl'
-    dataset = NTUDataset(ann_file, pipeline=None, split='xsub_train')
+    ann_file = '/home/yas50454/datasets/NTU_Data/NTU_60/ntu60_3danno.pkl'
+    normalizer = augmentations.Normalize3D()
+    pipeline = torchvision.transforms.Compose([normalizer])
+
+    noiser = augmentations.RandomAdditiveNoise(dist='NORMAL', prob=0.5, std=0.01)
+    augmentation = torchvision.transforms.Compose([noiser])
+    dataset = NTUDataset(ann_file, pipeline=None, split='xsub_train', num_classes=60, multi_class=True, augmentation=None)
+    # dataset = NTUDataset(ann_file, pipeline=None, split='xsub_train')
+    print(f"dataset size: {len(dataset)}")
     tmp = dataset[0]
+    print(f"tmp['frame_dir']={tmp['frame_dir']}\ntmp['label']={tmp['label'].shape}\ntmp['keypoint']={tmp['keypoint'].shape}\ntmp['total_frames']={tmp['total_frames']}\ntmp['start_index']={tmp['start_index']}\ntmp['input']={tmp['input'].shape}\n")
+    with open("/home/yas50454/datasets/NTU_Data/NTU_60/NTU_60_cross_subject_data_transform.pkl", 'wb') as f:
+        pickle.dump(dataset, f)
+        print(f"Pickle file saved!")
     print(1)

@@ -3,7 +3,8 @@ import numpy as np
 import pickle
 import torch
 
-from models import transformer
+from ntu_dataset import NTUDataset
+# from models import transformer
 
 
 # source: https://github.com/shlizee/Predict-Cluster
@@ -32,6 +33,7 @@ def mini_batch(data, seq_len, input_size, batch_size, hidden_dim):
 
 
 def normalize_video(video):
+    video = np.reshape(video, (video.shape[0], -1))  ### ERROR EDITED
     max_75 = np.amax(video, axis=0)
     min_75 = np.amin(video, axis=0)
     max_x = np.max([max_75[i] for i in range(0,75,3)])
@@ -118,12 +120,13 @@ def mini_batch_classify(feature_xyz, labels, seq_len, batch_size):
 
 
 if __name__ == '__main__':
-    path = '/home/dav86141/data/NTU_Data/NTU_60/'
-    train_data = load_data(path + 'cross_view_data/NTU_60_cross_view_data_transform.pkl')
-    test_data = load_data(path + 'cross_view_data/NTU_60_cross_view_data_val_transform.pkl')
+    path = '/home/yas50454/datasets/NTU_Data/NTU_60/'
+    train_data = load_data(path + 'NTU_60_cross_subject_data_transform.pkl')
+    test_data = load_data(path + 'NTU_60_cross_subject_data_val_transform.pkl')
     dataset_len = len(train_data)
+    
     for i in range(len(train_data)):
-        train_data[i]['input'] = normalize_video(np.asarray(train_data[i]['input']))
+        train_data[i]['input'] = normalize_video(np.asarray(train_data[i]['input'])) ### ERROR
     for i in range(len(test_data)):
         test_data[i]['input'] = normalize_video(np.asarray(test_data[i]['input']))
     print(train_data[0].keys())
@@ -133,7 +136,8 @@ if __name__ == '__main__':
     enc_in, _, dec_in, enc_in_len = mini_batch(dsamp_train, sequence_length, dsamp_train[0].shape[-1],
                                                dsamp_train[0].shape[0])
 
-    model = transformer.TransformerModel(orig_dim=enc_in.shape[-1], hidden_dim=128, depth=2, num_heads=4)
-    tmp2 = model(enc_in)
-    print(tmp2)
+    print(f"END SCRIPT!")
+    # model = transformer.TransformerModel(orig_dim=enc_in.shape[-1], hidden_dim=128, depth=2, num_heads=4)
+    # tmp2 = model(enc_in)
+    # print(tmp2)
     # transformer.TransformerModel()

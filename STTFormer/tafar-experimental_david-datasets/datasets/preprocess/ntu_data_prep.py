@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import sys
 import numpy as np
 import pickle
 import argparse
@@ -9,6 +10,11 @@ import torchvision
 
 
 import augmentations
+
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(parent_dir)
+from ntu_dataset import NTUDataset
+
 
 
 def save_statistics(ske_name, setup_file, camera_file, performer_file, replication_file, label_file):
@@ -596,6 +602,8 @@ def plot_data(data, lengths):
 
 
 def main():
+    
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--conf', action='append')
     args = parser.parse_args()
@@ -613,7 +621,7 @@ def main():
 
     normalizer = augmentations.Normalize3D()
     masker = augmentations.RandomMasking(augmentations={'frames': 0.5, 'joints': 0.5})
-    noiser = augmentations.RandomAdditiveNoise(dist='normal', prob=0.5, std=0.01)
+    noiser = augmentations.RandomAdditiveNoise(dist='NORMAL', prob=0.5, std=0.01) ### ERROR EDITED
     augment = torchvision.transforms.Compose([normalizer, masker, noiser])
     lengths = []
     for video in data['annotations']:
