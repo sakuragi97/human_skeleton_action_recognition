@@ -46,6 +46,7 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
                  ann_file,
                  pipeline,
                  augmentation,
+                 strong_augmentation,
                  data_prefix='',
                  test_mode=False,
                  multi_class=False,
@@ -62,6 +63,7 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
 
         self.pipeline = pipeline
         self.augmentation = augmentation
+        self.strong_augmentation = strong_augmentation
         self.video_infos = self.load_annotations()
         self.mask_pad_value = 1
 
@@ -130,16 +132,28 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
         onehot = torch.zeros(self.num_classes) #### ERROR EDITED
         onehot[results['label']] = 1.
         results['label'] = onehot
-        results['input'] = results['keypoint']
+        results['augment1'] = results['keypoint']
+        results['augment2'] = results['keypoint']
 
         if self.pipeline:
             self.pipeline(results)
+            results['original'] = results['keypoint']
 
         if self.augmentation:
             self.augmentation(results)
+            results['augment1'] = results['keypoint']
+            results['keypoint'] = results['original']
+        if self.strong_augmentation:
+            self.strong_augmentation(results)
+            results['augment2'] = results['keypoint']
+
 
         results['keypoint'] = torch.from_numpy(results['keypoint'].astype(np.float32))
-        results['input'] = torch.from_numpy(results['input'].astype(np.float32))
+        results['augment1'] = torch.from_numpy(results['augment1'].astype(np.float32))
+        results['augment2'] = torch.from_numpy(results['augment2'].astype(np.float32))
+        results['original'] = torch.from_numpy(results['original'].astype(np.float32))
+
+        
         return results
 
 

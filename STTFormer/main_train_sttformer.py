@@ -1,3 +1,5 @@
+# python main_train_sttformer.py --num_epoch 3
+
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,9 +13,9 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
 
-
-
+from tensorboardX import SummaryWriter
 from torchinfo import summary
 from tqdm.auto import tqdm
 from timeit import default_timer as timer
@@ -27,7 +29,6 @@ from model.sttformer import Model
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     parser.add_argument('--annotations', default='/home/yas50454/datasets/NTU_Data/NTU_60/ntu60_3danno.pkl', type=str, help='import annotation pickle file')
     parser.add_argument('--split', default='xsub', type=str, help='x_sub/x_view/xset')
     parser.add_argument('--output', default=f"exp_{timestamp}", type=str, help='choose directory for outputs')
@@ -44,7 +45,10 @@ def get_parser():
     
     # optim
     parser.add_argument('--learning_rate', type=float, default=0.1, help='initial learning rate')
-    parser.add_argument('--weight_decay', type=int, default=0.0004, nargs='+', help='weight decay for optimizer')
+    parser.add_argument('--weight_decay', type=float, default=0.0004, nargs='+', help='weight decay for optimizer')
+    parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='learning rate decay for optimizer')
+    parser.add_argument('--step', type=int, default=[60,80], help='step for optimizer')
+    parser.add_argument('--warm_up_epoch', type=int, default=5, help='warm up epoch for optimizer')
     parser.add_argument('--num_epoch', type=int, default=6, help='number of epochs for training')
     
 
@@ -70,7 +74,7 @@ def load_model(device: int, model_path: str=None):
               config=config).cuda(output_device)
 
     sttformer_model = nn.DataParallel(sttformer_model,
-                                      device_ids=[output_device,output_device+1])
+                                      device_ids=[output_device,output_device+1,output_device+2,output_device+3])
 
     if model_path:
         sttformer_model.load_state_dict(torch.load(f=model_path, map_location='cuda:0'))
@@ -104,7 +108,17 @@ def print_model_summary(model: torch.nn.Module,
                         input_size):
     summary(model, input_size)
     
-  
+def adjust_learning_rate(epoch, optimizer, base_lr, warm_up_epoch, lr_decay_rate,step):
+    # print(f"adjust learning rate, using warm up, epoch: {warm_up_epoch}")
+    if epoch < warm_up_epoch:
+        lr = base_lr * (epoch + 1) / warm_up_epoch
+    else:
+        lr = base_lr * ( lr_decay_rate ** np.sum(epoch >= np.array(step)))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
+
+
 ### Training step
 def train_step(model: torch.nn.Module,
                dataloader: torch.utils.data.DataLoader,
@@ -179,25 +193,45 @@ def train(model: torch.nn.Module,
              "train_acc": [],
              "test_loss": [],
              "test_acc": []}
-  
+    global train_writer
+    global global_step
+
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: adjust_learning_rate(epoch,
+                                                                                              optimizer,
+                                                                                               args.learning_rate,
+                                                                                               args.warm_up_epoch,
+                                                                                               args.lr_decay_rate,
+                                                                                               args.step))
+
     for epoch in tqdm(range(epochs)):
+        train_writer.add_scalar('epoch', epoch, global_step)
+        global_step += 1
+
         train_loss, train_acc = train_step(model=model,
                                         dataloader=train_dataloader,
                                         loss_fn=loss_fn,
                                         optimizer=optimizer,
                                         device=device)
-        
+        scheduler.step()
+        lr = optimizer.param_groups[0]["lr"]
         test_loss, test_acc = test_step(model=model,
                                         dataloader=test_dataloader,
                                         loss_fn=loss_fn,
                                         device=device)
-        print(f"Epoch: {epoch} | Train loss: {train_loss:.4f} | Train acc: {train_acc:.4f} | Test loss: {test_loss:.4f} | Test acc: {test_acc:.4f}")
+        print(f"Epoch: {epoch} | Train loss: {train_loss:.4f} | Train acc: {train_acc:.4f} | Test loss: {test_loss:.4f} | Test acc: {test_acc:.4f} | lr: {lr:.4f}")
+
+        train_writer.add_scalar('train_loss', train_loss, global_step)
+        train_writer.add_scalar('train_acc', train_acc, global_step)
+        train_writer.add_scalar('learning_rate', lr, global_step)
+        train_writer.add_scalar('test_loss', test_loss, global_step)
+        train_writer.add_scalar('test_acc', test_acc, global_step)
 
         results["train_loss"].append(train_loss)
         results["train_acc"].append(train_acc)
         results["test_loss"].append(test_loss)
         results["test_acc"].append(test_acc)
-    
+
+
     return results
 
 def save_model(model: torch.nn.Module,
@@ -205,7 +239,7 @@ def save_model(model: torch.nn.Module,
     # Create model save
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     model_name = f"sttformer_{timestamp}.pth"
-    model_save_path = os.path.join(output,model_name)
+    model_save_path = os.path.join('exp',output,model_name)
 
     #save model state dict
     print(f"Saving model to:{model_save_path}")
@@ -353,6 +387,7 @@ def main(parser, action_classes):
     model_path = Path(os.path.join(exp_folder,args.output))
     model_path.mkdir(parents=True, exist_ok=True)
 
+    
     model = load_model(args.device, args.model_path)
     train_dataset, test_dataset = load_dataset(ann_file=args.annotations,
                                                split=args.split,
@@ -422,11 +457,17 @@ def main(parser, action_classes):
                 all_subjects=True,
                 action_classes=action_classes,
                 output=args.output)
+    
+    train_writer.close()
 
 
 if __name__ == '__main__':
+    timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     parser = get_parser()
     args = parser.parse_args()
+    global_step = 0
+    train_writer = SummaryWriter(os.path.join('exp',args.output))
+
     action_classes = [
     'drink water', 'eat meal/snack', 'brushing teeth', 'brushing hair', 'drop', 'pickup', 'throw', 'sitting down',
     'standing up (from sitting position)', 'clapping', 'reading', 'writing', 'tear up paper', 'wear jacket',

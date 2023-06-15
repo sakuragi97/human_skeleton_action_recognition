@@ -65,7 +65,7 @@ ENV/
 env.bak/
 venv.bak/
 
-
+exp/
 Dataset/
 *.zip
 *.pkl
