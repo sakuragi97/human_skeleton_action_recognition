@@ -62,9 +62,9 @@ class DinoMLP(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(*[
             nn.Linear(in_channels, hidden_channels),
-            nn.GELU(),
+            nn.LeakyReLU(0.1),
             nn.Linear(hidden_channels, hidden_channels),
-            nn.GELU(),
+            nn.LeakyReLU(0.1),
             nn.Linear(hidden_channels, bottleneck_channels),
         ])
 
@@ -108,7 +108,7 @@ class DINOLoss(nn.Module):
         # teacher centering and sharpening
         temp = self.teacher_temp_schedule[epoch]
         teacher_out = F.softmax((teacher_output - self.center) / temp, dim=-1)
-        teacher_out = teacher_out.detach().chunk(2)
+        teacher_out = teacher_out.detach().chunk(2) #EDIT
 
         total_loss = 0
         n_loss_terms = 0

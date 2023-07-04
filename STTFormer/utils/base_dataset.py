@@ -153,11 +153,15 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
                 results['keypoint'] = results['original']
                 results['samples'].append(results['augment2'])
 
-
+        del results['augment1']
+        del results['augment2']
+        del results['original']
+        del results['input']
+        
         results['keypoint'] = torch.from_numpy(results['keypoint'].astype(np.float32))
-        results['augment1'] = torch.from_numpy(results['augment1'].astype(np.float32))
-        results['augment2'] = torch.from_numpy(results['augment2'].astype(np.float32))
-        results['original'] = torch.from_numpy(results['original'].astype(np.float32))
+        # results['augment1'] = torch.from_numpy(results['augment1'].astype(np.float32))
+        # results['augment2'] = torch.from_numpy(results['augment2'].astype(np.float32))
+        # results['original'] = torch.from_numpy(results['original'].astype(np.float32))
         for i in range(len(results['samples'])):
             results['samples'][i] = torch.from_numpy(results['samples'][i].astype(np.float32))
         
