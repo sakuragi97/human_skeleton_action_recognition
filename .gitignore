@@ -78,3 +78,6 @@ Dataset/
 *.mp4
 *.log
 *.npz
+*.pth
+*.pt
+*.txt
