@@ -6,6 +6,7 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
 import numpy as np
+from sklearn.neighbors import KNeighborsClassifier
 
 class MultiCropWrapper(nn.Module):
     """
@@ -62,10 +63,8 @@ class DinoMLP(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(*[
             nn.Linear(in_channels, hidden_channels),
+            nn.BatchNorm1d(hidden_channels),
             nn.LeakyReLU(0.1),
-            nn.Linear(hidden_channels, hidden_channels),
-            nn.LeakyReLU(0.1),
-            nn.Linear(hidden_channels, bottleneck_channels),
         ])
 
         # self.last_layer = nn.Linear(
@@ -73,11 +72,13 @@ class DinoMLP(nn.Module):
 
         self.last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_channels, out_channels, bias=False))
         self.last_layer.weight_g.data.fill_(1)
+        self.last_layer.weight_g.requires_grad = False
+        self.last_layer0 = nn.Linear(hidden_channels, out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.mlp(x)
         x = nn.functional.normalize(x, dim=-1, p=2)
-        x = self.last_layer(x)
+        x = self.last_layer0(x)
         return x
     
 
@@ -108,7 +109,7 @@ class DINOLoss(nn.Module):
         # teacher centering and sharpening
         temp = self.teacher_temp_schedule[epoch]
         teacher_out = F.softmax((teacher_output - self.center) / temp, dim=-1)
-        teacher_out = teacher_out.detach().chunk(2) #EDIT
+        teacher_out = teacher_out.detach().chunk(1) #EDIT
 
         total_loss = 0
         n_loss_terms = 0
@@ -236,3 +237,23 @@ class LARS(torch.optim.Optimizer):
                 mu.mul_(g['momentum']).add_(dp)
 
                 p.add_(mu, alpha=-g['lr'])
+
+class CustomKNeighborsClassifier:
+    def __init__(self, embedding, label, n_neighbors=1, metric='cosine'):
+        self.knc = KNeighborsClassifier(n_neighbors=n_neighbors, metric=metric, n_jobs=20)
+        assert type(embedding) in [torch.Tensor, np.ndarray], f'Invalid embedding type: {type(embedding)}'
+        if isinstance(embedding, torch.Tensor):
+            embedding = np.asarray(embedding.cpu().detach().numpy())
+        if isinstance(label, torch.Tensor):
+            label = np.asarray(label.cpu().detach().numpy())
+        # embedding = np.nan_to_num(embedding)
+        # label = np.nan_to_num(label)
+        self.knc.fit(embedding, label)
+
+ 
+
+    def __call__(self, embedding):
+        assert type(embedding) in [torch.Tensor, np.ndarray], f'Invalid embedding type: {type(embedding)}'
+        if isinstance(embedding, torch.Tensor):
+            embedding = np.asarray(embedding.cpu().detach().numpy())
+        return self.knc.predict(embedding)

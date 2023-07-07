@@ -34,6 +34,8 @@ from utils.Dino_utils import DINOLoss
 from utils.Dino_utils import get_params_groups
 from utils.Dino_utils import LARS
 from utils.Dino_utils import cosine_scheduler, get_world_size
+from utils.Dino_utils import CustomKNeighborsClassifier
+from utils.Dino_utils import LARS
 
 from tqdm.auto import tqdm
 from timeit import default_timer as timer
@@ -90,12 +92,22 @@ def plot_tensor_skeleton(tensor: torch.Tensor, set_frame: int=None, all_subjects
 
             title = f"Sample total lengh: {tensor_reshaped.shape[1]} frame: {random_frame_idx}"
             plt.title(title)
-    
+
+def classify(embeddings, labels, classifier=None):
+
+    if classifier:
+
+        return classifier, classifier(embeddings)
+
+    classifier = CustomKNeighborsClassifier(embedding=embeddings, label=labels)
+
+    return classifier, classifier(embeddings)
 
 def train_step(student: torch.nn.Module,
                teacher: torch.nn.Module,
-               dino_mlp: torch.nn.Module,
-               dataloader: torch.utils.data.DataLoader,
+               train_dataloader: torch.utils.data.DataLoader,
+               normal_dataloader: torch.utils.data.DataLoader,
+               val_dataloader: torch.utils.data.DataLoader,
                dino_loss: torch.nn.Module,
                optimizer: torch.optim.Optimizer,
                momentum_schedule,
@@ -111,9 +123,9 @@ def train_step(student: torch.nn.Module,
     cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
     
 
-    for it, batch_item in enumerate(dataloader):
+    for it, batch_item in enumerate(train_dataloader):
         # update weight decay and learning rate according to their schedule
-        it = (len(dataloader) * epoch) + it  # global training iteration
+        it = (len(train_dataloader) * epoch) + it  # global training iteration
         # for i, param_group in enumerate(optimizer.param_groups):
         #         param_group["lr"] = lr_schedule[it]
         #         if i == 0:  # only the first group is regularized
@@ -125,7 +137,7 @@ def train_step(student: torch.nn.Module,
         X_views = [view.cuda(device) for view in X_views]
 
         # Forward pass
-        teacher_output = teacher(X_views[:2]) # The two first views are global views
+        teacher_output = teacher(X_views[:1]) # The two first views are global views
 
         student_output = student(X_views)
         
@@ -133,7 +145,7 @@ def train_step(student: torch.nn.Module,
         
         train_loss += loss.item()
         
-        cos_output = cos(teacher_output.chunk(2)[0], student_output.chunk(5)[0])
+        cos_output = cos(teacher_output.detach().chunk(1)[0], student_output.detach().chunk(2)[0])
         cos_sum += torch.sum(cos_output)/len(cos_output)
 
         if not math.isfinite(loss.item()):
@@ -160,15 +172,45 @@ def train_step(student: torch.nn.Module,
 
         # lr_update = lr_schedule[it]
         # weight_decay_update = wd_schedule[it]  
-    if (epoch+1) % 25 == 0:
-        lr_schedule.base_lrs[0] = lr_schedule.base_lrs[0] * 0.7  
+    
+    if epoch==0 or epoch % 3==0:
+        labels=[]
+        val_labels=[]
+        train_embeds=[]
+        val_embeds=[]
+        student.eval()
+        with torch.inference_mode():
+            for it, batch_item in enumerate(normal_dataloader):
+                label = torch.argmax(batch_item['label'], dim=-1) 
+                embed = student(batch_item['keypoint']).detach().cpu().numpy()
+                labels.append(label)
+                train_embeds.append(embed)
+            
+            labels = np.concatenate(labels, axis=0)
+            train_embeds = np.concatenate(train_embeds, axis=0)
+
+            for it, batch_item in enumerate(val_dataloader):
+                label = torch.argmax(batch_item['label'], dim=-1) 
+                embed = student(batch_item['keypoint']).detach().cpu().numpy()
+                val_labels.append(label)
+                val_embeds.append(embed)
+            
+            val_labels = np.concatenate(val_labels, axis=0)
+            val_embeds = np.concatenate(val_embeds, axis=0)
+
+            knn_classifier, knn_pred = classify(train_embeds, labels, classifier=None)
+            knn_val_pred = knn_classifier(val_embeds)
+            knn_acc = (knn_val_pred == val_labels).sum() / len(knn_val_pred)
+    else:
+        knn_acc = 0.
+              
     lr_schedule.step()
     
     # Adjust metrics to get average loss and accuracy 
-    train_loss = train_loss / len(dataloader)
-    cos_sim = cos_sum / len(dataloader)
+    train_loss = train_loss / len(train_dataloader)
+    cos_sim = cos_sum / len(train_dataloader)
    
-    return train_loss, lr_update, cos_sim
+    return train_loss, lr_update, cos_sim, knn_acc
 
 def plot_loss_curves(results: Dict[str, List[float]]):
   """
@@ -228,8 +270,11 @@ def main():
     pipeline = torchvision.transforms.Compose([augmentations.PreNormalize3D(),ntu2feeder])
     augmentation = torchvision.transforms.Compose([augmentations.RandomRot(theta=0.2), augmentations.RandomScale(scale=0.2), augmentations.RandomGaussianNoise(sigma=0.005)])
     strong_augmentation = torchvision.transforms.Compose([augmentations.RandomRot(theta=0.6), augmentations.RandomScale(scale=0.6), augmentations.RandomGaussianNoise(sigma=0.04)])
+    
     ntu_augmented_dataset = NTUDataset(ann_file, pipeline=pipeline, split='xsub_train', num_classes=60, multi_class=True, augmentation=augmentation, strong_augmentation=strong_augmentation)
 
+    ntu_normal_dataset = NTUDataset(ann_file, pipeline=pipeline, split='xsub_train', num_classes=60, multi_class=True, augmentation=None, strong_augmentation=None)
+    ntu_val_dataset = NTUDataset(ann_file, pipeline=pipeline, split='xsub_val', num_classes=60, multi_class=True, augmentation=None, strong_augmentation=None)
 
     
     ### Preparing models student, teacher
@@ -264,7 +309,7 @@ def main():
 
     in_channels = 256
     hidden_channels=512
-    bottleneck_channels=256
+    bottleneck_channels=128 #Had no effect on training
     out_channels=128
 
     dino_mlp = DinoMLP(
@@ -291,10 +336,10 @@ def main():
 
 
     ### Preparing Loss
-    epochs = 20
+    epochs = 51
 
     dino_loss = DINOLoss(out_dim=128,
-                        ncrops=5,
+                        ncrops=2,
                         warmup_teacher_temp=0.03,
                         teacher_temp=0.03,
                         warmup_teacher_temp_epochs=0,
@@ -306,14 +351,19 @@ def main():
 
     params_group = get_params_groups(sttformer_student)
 
-    learning_rate = 0.2
-    weight_decay = 0.00004
-    optimizer = optim.SGD(params_group,
-                        lr=learning_rate,
-                        momentum=0.9,
-                        nesterov=True,
-                        weight_decay=weight_decay
-                        )
+    learning_rate = 0.3
+    weight_decay = 0.0004
+    # optimizer = optim.SGD(params_group,
+    #                     lr=learning_rate,
+    #                     momentum=0.9,
+    #                     nesterov=True,
+    #                     weight_decay=weight_decay
+    #                     )
+    
+    optimizer = LARS(params_group,
+                     lr=learning_rate,
+                     weight_decay=weight_decay,
+                     momentum=0.9)
     # optimizer = optim.Adam(params_group,
     #                     lr=learning_rate,
     #                     weight_decay=weight_decay
@@ -323,6 +373,18 @@ def main():
     batch_size_per_gpu = 128
 
     ntu_train_dataloader = DataLoader(dataset=ntu_augmented_dataset,
+                                batch_size=batch_size_per_gpu,
+                                shuffle=True,
+                                drop_last=True,
+                                num_workers=os.cpu_count())
+    
+    ntu_normal_dataloader = DataLoader(dataset=ntu_normal_dataset,
+                                batch_size=batch_size_per_gpu,
+                                shuffle=True,
+                                drop_last=True,
+                                num_workers=os.cpu_count())
+    
+    ntu_val_dataloader = DataLoader(dataset=ntu_val_dataset,
                                 batch_size=batch_size_per_gpu,
                                 shuffle=True,
                                 drop_last=True,
@@ -376,20 +438,23 @@ def main():
         train_writer.add_scalar('epoch', epoch, global_step)
 
     # for epoch in range(epochs):
-        train_loss, lr_update, cos_sim = train_step(student=sttformer_student,
+        train_loss, lr_update, cos_sim, knn_acc = train_step(student=sttformer_student,
                                                                 teacher=sttformer_teacher,
-                                                                dino_mlp=dino_mlp,
-                                                                dataloader=ntu_train_dataloader,
+                                                                train_dataloader=ntu_train_dataloader,
+                                                                normal_dataloader=ntu_normal_dataloader,
+                                                                val_dataloader=ntu_val_dataloader,
                                                                 dino_loss=dino_loss,
                                                                 optimizer=optimizer,
                                                                 lr_schedule=lr_schedule,
                                                                 momentum_schedule=momentum_schedule,
                                                                 epoch=epoch,
                                                                 device=output_device)
-        print(f"Epoch: {epoch} | Train loss: {train_loss:.4f} | Cos similarity: {cos_sim:.4f} |lr update: {lr_update:.4f}")
+        print(f"Epoch: {epoch} | Train loss: {train_loss:.4f} | Cos similarity: {cos_sim:.4f} | Knn acc: {knn_acc:.4f} | lr update: {lr_update:.4f}")
         train_writer.add_scalar('train_loss', train_loss, global_step)
         train_writer.add_scalar('learning_rate', lr_update, global_step)
         train_writer.add_scalar('cos_sim', cos_sim, global_step)
+        train_writer.add_scalar('knn_acc', knn_acc, global_step)
+
 
         global_step += 1
 

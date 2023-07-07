@@ -141,13 +141,13 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
             results['original'] = results['keypoint']
 
         if self.augmentation:
-            for _ in range(2):
+            for _ in range(1):
                 self.augmentation(results)
                 results['augment1'] = results['keypoint']
                 results['keypoint'] = results['original']
                 results['samples'].append(results['augment1'])
         if self.strong_augmentation:
-            for _ in range(3):
+            for _ in range(1):
                 self.strong_augmentation(results)
                 results['augment2'] = results['keypoint']
                 results['keypoint'] = results['original']
